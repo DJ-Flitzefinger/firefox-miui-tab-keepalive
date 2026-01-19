@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Firefox MIUI Tab KeepAlive
 // @namespace    https://github.com/DJ-Flitzefinger/firefox-miui-tab-keepalive
-// @version      1.2.0
+// @version      1.2.1
 // @description  Prevents Firefox Mobile tabs from being discarded or reloaded by MIUI's aggressive memory management on Xiaomi phones, using a silent phantom MediaSession and background playback support on whitelisted sites.
 // @license      GPL-3.0-or-later
 // @match        *://*/*
@@ -83,9 +83,9 @@
 
   /**
    * MediaSession refresh interval.
-   * Keeps the phantom entry stable in Android's "Now Playing" UI.
+   * Set to 0 to disable periodic refresh (avoids interrupting other audio apps).
    */
-  const MEDIASESSION_REFRESH_MS = 10000;
+  const MEDIASESSION_REFRESH_MS = 0;
 
   /**
    * Backoff watchdog parameters for resuming phantom playback.
@@ -537,7 +537,8 @@
     clearWatchdogLoop();
     scheduleWatchdogLoop();
 
-    startMediaSessionRefresh();
+    // MediaSession is set once above via setMediaSessionPlaying(true)
+    // No periodic refresh to avoid interrupting other audio apps
   }
 
   function stopKeepAlive() {
