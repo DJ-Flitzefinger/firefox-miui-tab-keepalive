@@ -9,6 +9,14 @@ The format is based on **Keep a Changelog** and this project adheres to **Semant
 ### Changed
 ### Fixed
 
+## [1.2.1] - 2026-01-19
+### Changed
+- MediaSession is now set only once at startup instead of periodically refreshed.
+- `MEDIASESSION_REFRESH_MS` set to 0 (disabled) to avoid interrupting other audio apps.
+
+### Fixed
+- External music apps no longer get interrupted every few seconds.
+
 ## [1.2.0] - 2026-01-19
 ### Added
 - Web Locks API support to signal the browser that the tab holds an important resource.
