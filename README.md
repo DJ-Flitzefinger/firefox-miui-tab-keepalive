@@ -182,5 +182,6 @@ If you distribute a modified version of this script, it must remain GPL-licensed
 
 * Source code and issue tracking: **GitHub repository**
 * Distribution and updates: **Greasy Fork**
+* https://github.com/DJ-Flitzefinger/firefox-miui-tab-keepalive/releases/latest
 
 Contributions, bug reports, and platform-specific findings are welcome.
