@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Firefox MIUI Tab KeepAlive
 // @namespace    https://github.com/DJ-Flitzefinger/firefox-miui-tab-keepalive
-// @version      1.1.0
+// @version      1.2.0
 // @description  Prevents Firefox Mobile tabs from being discarded or reloaded by MIUI's aggressive memory management on Xiaomi phones, using a silent phantom MediaSession and background playback support on whitelisted sites.
 // @license      GPL-3.0-or-later
 // @match        *://*/*
@@ -66,8 +66,8 @@
    * Background-play "owner" parameters.
    * Only the owner tab fakes visibility and emits lightweight activity ticks.
    */
-  const OWNER_HEARTBEAT_MS = 8000;
-  const OWNER_TTL_MS = 25000;
+  const OWNER_HEARTBEAT_MS = 3000;
+  const OWNER_TTL_MS = 12000;
 
   /**
    * Compare-and-swap delay for owner claim verification.
@@ -85,7 +85,7 @@
    * MediaSession refresh interval.
    * Keeps the phantom entry stable in Android's "Now Playing" UI.
    */
-  const MEDIASESSION_REFRESH_MS = 30000;
+  const MEDIASESSION_REFRESH_MS = 10000;
 
   /**
    * Backoff watchdog parameters for resuming phantom playback.
@@ -99,6 +99,12 @@
    * Lower values reduce CPU usage.
    */
   const CANVAS_STREAM_FPS = 0.5;
+
+  /**
+   * IndexedDB heartbeat interval.
+   * Periodic writes to keep the database connection active.
+   */
+  const INDEXEDDB_HEARTBEAT_MS = 15000;
 
   // ============================================================
   // Global state (Tampermonkey storage, cross-domain)
@@ -262,6 +268,122 @@
   }
 
   // ============================================================
+  // Web Locks API (prevents tab from being considered idle)
+  // ============================================================
+
+  let webLockHeld = false;
+  let webLockAbortController = null;
+
+  async function acquireWebLock() {
+    if (webLockHeld) return;
+    if (!('locks' in navigator)) return;
+
+    try {
+      webLockAbortController = new AbortController();
+      webLockHeld = true;
+
+      // Request an exclusive lock that we hold indefinitely
+      navigator.locks.request(
+        'ffka-keepalive-' + tabId,
+        { mode: 'exclusive', signal: webLockAbortController.signal },
+        () => new Promise(() => {}) // Never resolves = hold lock forever
+      ).catch(() => {
+        // Lock was aborted or failed
+        webLockHeld = false;
+      });
+    } catch (_) {
+      webLockHeld = false;
+    }
+  }
+
+  function releaseWebLock() {
+    if (!webLockHeld) return;
+
+    try {
+      if (webLockAbortController) {
+        webLockAbortController.abort();
+        webLockAbortController = null;
+      }
+    } catch (_) {}
+
+    webLockHeld = false;
+  }
+
+  // ============================================================
+  // IndexedDB Heartbeat (keeps database connection active)
+  // ============================================================
+
+  const IDB_NAME = 'ffka-keepalive-db';
+  const IDB_STORE = 'heartbeat';
+  let idbDatabase = null;
+  let idbHeartbeatTimer = null;
+
+  function openIndexedDB() {
+    return new Promise((resolve, reject) => {
+      try {
+        const request = indexedDB.open(IDB_NAME, 1);
+
+        request.onupgradeneeded = (event) => {
+          const db = event.target.result;
+          if (!db.objectStoreNames.contains(IDB_STORE)) {
+            db.createObjectStore(IDB_STORE, { keyPath: 'id' });
+          }
+        };
+
+        request.onsuccess = (event) => {
+          resolve(event.target.result);
+        };
+
+        request.onerror = () => {
+          reject(request.error);
+        };
+      } catch (e) {
+        reject(e);
+      }
+    });
+  }
+
+  async function writeIndexedDBHeartbeat() {
+    if (!idbDatabase) return;
+
+    try {
+      const tx = idbDatabase.transaction(IDB_STORE, 'readwrite');
+      const store = tx.objectStore(IDB_STORE);
+      store.put({ id: tabId, ts: Date.now(), url: location.href });
+    } catch (_) {}
+  }
+
+  async function startIndexedDBHeartbeat() {
+    if (idbHeartbeatTimer) return;
+
+    try {
+      idbDatabase = await openIndexedDB();
+      await writeIndexedDBHeartbeat();
+
+      idbHeartbeatTimer = setInterval(() => {
+        if (!enabledLocal) return;
+        writeIndexedDBHeartbeat();
+      }, INDEXEDDB_HEARTBEAT_MS);
+    } catch (_) {
+      // IndexedDB not available, continue without it
+    }
+  }
+
+  function stopIndexedDBHeartbeat() {
+    if (idbHeartbeatTimer) {
+      clearInterval(idbHeartbeatTimer);
+      idbHeartbeatTimer = null;
+    }
+
+    if (idbDatabase) {
+      try {
+        idbDatabase.close();
+      } catch (_) {}
+      idbDatabase = null;
+    }
+  }
+
+  // ============================================================
   // KeepAlive core (phantom media)
   // ============================================================
 
@@ -400,6 +522,12 @@
 
     setUi(true);
 
+    // Acquire Web Lock
+    await acquireWebLock();
+
+    // Start IndexedDB heartbeat
+    await startIndexedDBHeartbeat();
+
     await ensureVideoElement();
     try { await videoEl.play(); } catch (_) {}
 
@@ -426,6 +554,12 @@
 
     clearWatchdogLoop();
     retryDelayMs = RETRY_DELAY_MIN;
+
+    // Release Web Lock
+    releaseWebLock();
+
+    // Stop IndexedDB heartbeat
+    stopIndexedDBHeartbeat();
 
     try {
       if (videoEl) {

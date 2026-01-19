@@ -9,6 +9,16 @@ The format is based on **Keep a Changelog** and this project adheres to **Semant
 ### Changed
 ### Fixed
 
+## [1.2.0] - 2026-01-19
+### Added
+- Web Locks API support to signal the browser that the tab holds an important resource.
+- IndexedDB heartbeat mechanism with periodic writes to keep database connection active.
+
+### Changed
+- `MEDIASESSION_REFRESH_MS` reduced from 30000 to 10000 for more aggressive MediaSession persistence.
+- `OWNER_HEARTBEAT_MS` reduced from 8000 to 3000 for faster owner synchronization.
+- `OWNER_TTL_MS` reduced from 25000 to 12000 to match new heartbeat timing.
+
 ## [1.1.0] - 2026-01-19
 ### Added
 - Compare-and-swap verification for owner claiming (`OWNER_CLAIM_VERIFY_DELAY_MS`) to reduce cross-tab race conditions.
@@ -17,8 +27,7 @@ The format is based on **Keep a Changelog** and this project adheres to **Semant
 - Synthetic activity emitter using `MouseEvent`/`PointerEvent` with plausible coordinates for improved compatibility on some sites.
 
 ### Changed
-- MediaSession refresh interval reduced for more reliable “Now Playing” persistence on Android/MIUI.
-- Background-play whitelist expanded (additional common video/audio platforms added).
+- MediaSession refresh interval reduced for more reliable "Now Playing" persistence on Android/MIUI.
 
 ### Fixed
 - Prevented leftover visibility hooks / event listeners from persisting after disabling KeepAlive.
