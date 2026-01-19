@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         Firefox MIUI Tab KeepAlive
 // @namespace    https://github.com/DJ-Flitzefinger/firefox-miui-tab-keepalive
-// @version      1.0
-// @description  Prevents Firefox Mobile tabs from being discarded or reloaded by MIUI’s aggressive memory management on Xiaomi phones, using a silent phantom MediaSession and background playback support on whitelisted sites.
+// @version      1.1.0
+// @description  Prevents Firefox Mobile tabs from being discarded or reloaded by MIUI's aggressive memory management on Xiaomi phones, using a silent phantom MediaSession and background playback support on whitelisted sites.
 // @license      GPL-3.0-or-later
 // @match        *://*/*
 // @run-at       document-idle
@@ -70,6 +70,12 @@
   const OWNER_TTL_MS = 25000;
 
   /**
+   * Compare-and-swap delay for owner claim verification.
+   * Allows other tabs time to potentially claim ownership.
+   */
+  const OWNER_CLAIM_VERIFY_DELAY_MS = 50;
+
+  /**
    * Synthetic user-activity tick interval (owner tab only).
    * Keep this large (60–120s) to minimize wakeups while still helping sites that stop playback on inactivity.
    */
@@ -79,7 +85,7 @@
    * MediaSession refresh interval.
    * Keeps the phantom entry stable in Android's "Now Playing" UI.
    */
-  const MEDIASESSION_REFRESH_MS = 60000;
+  const MEDIASESSION_REFRESH_MS = 30000;
 
   /**
    * Backoff watchdog parameters for resuming phantom playback.
@@ -87,6 +93,12 @@
    */
   const RETRY_DELAY_MIN = 15000;
   const RETRY_DELAY_MAX = 120000;
+
+  /**
+   * Canvas stream framerate for fallback phantom video.
+   * Lower values reduce CPU usage.
+   */
+  const CANVAS_STREAM_FPS = 0.5;
 
   // ============================================================
   // Global state (Tampermonkey storage, cross-domain)
@@ -173,15 +185,28 @@
   }
 
   /**
-   * Claim ownership for bg-play features.
-   * The last writer wins, which is intended: "last played" becomes the owner.
+   * Claim ownership for bg-play features using compare-and-swap pattern.
+   * Returns true if this tab successfully claimed ownership, false otherwise.
    */
   async function claimOwner(reason) {
     void reason;
-    if (!(await getGlobalEnabled())) return;
+    if (!(await getGlobalEnabled())) return false;
 
+    // Write our claim
     await gmSet(KEY_OWNER_ID, tabId);
     await gmSet(KEY_OWNER_TS, now());
+
+    // Brief delay to allow concurrent claims to settle
+    await new Promise(r => setTimeout(r, OWNER_CLAIM_VERIFY_DELAY_MS));
+
+    // Verify we're still the owner (compare-and-swap verification)
+    const currentOwner = await gmGet(KEY_OWNER_ID, '');
+    if (currentOwner !== tabId) {
+      // Another tab claimed ownership after us
+      return false;
+    }
+
+    return true;
   }
 
   // ============================================================
@@ -298,6 +323,10 @@
     }
   }
 
+  /**
+   * Minimal valid MP4 video (black frame, no audio).
+   * This is a widely compatible ftyp+moov+moof structure.
+   */
   const DATA_MP4 =
     'data:video/mp4;base64,' +
     'AAAAHGZ0eXBpc29tAAACAGlzb21pc28yYXZjMW1wNDEAAABsbW9vdgAAAGxtdmhkAAAAAAAAAAAAAAAAAAAD6AAAA+gAAQAAAQAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAgAAABR0cmFrAAAAXHRraGQAAAADAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAABAAAAAEAAAAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAgAAAAJtZGlhAAAAIG1kaGQAAAAAAAAAAAAAAAAAAAPoAAAD6AABAAAAAAAALWhkbHIAAAAAAAAAAHZpZGUAAAAAAAAAAAAAAABWaWRlb0hhbmRsZXIAAAABGm1pbmYAAAAUdm1oZAAAAAEAAAAAAAAAAAAAACRkaW5mAAAAHGRyZWYAAAABAAAAAQAAABx1cmwgAAAAAQAAAFJzdGJsAAAAQHN0c2QAAAABAAAAAAAwYXZjMQAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAAABAAAAAQAAAAAAAAAAAAAAAAAAAAAAABj//wAAACRzdHRzAAAAAQAAAAEAAAABAAAAHGN0dHMAAAABAAAAAQAAAAEAAAAUc3RzYwAAAAEAAAABAAAAAQAAAAEAAAAUc3RzegAAAAEAAAABAAAAAQAAABRzdGNvAAAAAQAAAAEAAAABAAAAHG1vb2YAAAAMbWZoZAAAAAEAAAAA';
@@ -325,7 +354,7 @@
           ctx.fillStyle = 'black';
           ctx.fillRect(0, 0, 2, 2);
         }
-        const stream = canvas.captureStream(1);
+        const stream = canvas.captureStream(CANVAS_STREAM_FPS);
         v.srcObject = stream;
       } catch (_) {}
     }, { once: true });
@@ -413,6 +442,9 @@
     videoEl = null;
 
     localOwnerFlag = false;
+
+    // Restore original visibility API when disabled
+    uninstallVisibilityHooks();
   }
 
   // ============================================================
@@ -446,12 +478,13 @@
 
   let visibilityHooksInstalled = false;
   let localOwnerFlag = false;
+  let visibilityBlockerRef = null;
 
   async function refreshLocalOwnerFlag() {
     localOwnerFlag = await isMeOwner();
   }
 
-  function installVisibilityHooksOnce() {
+  function installVisibilityHooks() {
     if (visibilityHooksInstalled) return;
     visibilityHooksInstalled = true;
 
@@ -475,11 +508,86 @@
       });
     } catch (_) {}
 
-    const blocker = (ev) => {
+    // Store reference so we can remove it later
+    visibilityBlockerRef = (ev) => {
       if (enabledLocal && isBgPlayDomain() && localOwnerFlag) ev.stopImmediatePropagation();
     };
-    document.addEventListener('visibilitychange', blocker, true);
-    document.addEventListener('webkitvisibilitychange', blocker, true);
+    document.addEventListener('visibilitychange', visibilityBlockerRef, true);
+    document.addEventListener('webkitvisibilitychange', visibilityBlockerRef, true);
+  }
+
+  function uninstallVisibilityHooks() {
+    if (!visibilityHooksInstalled) return;
+
+    // Restore original visibilityState property
+    try {
+      if (origVisibilityState) {
+        Object.defineProperty(document, 'visibilityState', origVisibilityState);
+      } else {
+        delete document.visibilityState;
+      }
+    } catch (_) {}
+
+    // Restore original hidden property
+    try {
+      if (origHidden) {
+        Object.defineProperty(document, 'hidden', origHidden);
+      } else {
+        delete document.hidden;
+      }
+    } catch (_) {}
+
+    // Remove event blockers
+    if (visibilityBlockerRef) {
+      try {
+        document.removeEventListener('visibilitychange', visibilityBlockerRef, true);
+        document.removeEventListener('webkitvisibilitychange', visibilityBlockerRef, true);
+      } catch (_) {}
+      visibilityBlockerRef = null;
+    }
+
+    visibilityHooksInstalled = false;
+  }
+
+  // ============================================================
+  // Synthetic user activity (owner tab only)
+  // ============================================================
+
+  /**
+   * Emit synthetic mouse/pointer events with realistic coordinates.
+   * Note: isTrusted will still be false, but coordinates are plausible.
+   */
+  function emitSyntheticActivity() {
+    const clientX = Math.random() * (window.innerWidth || 800);
+    const clientY = Math.random() * (window.innerHeight || 600);
+
+    try {
+      const mouseEvt = new MouseEvent('mousemove', {
+        bubbles: true,
+        cancelable: true,
+        clientX: clientX,
+        clientY: clientY,
+        screenX: clientX + (window.screenX || 0),
+        screenY: clientY + (window.screenY || 0),
+        view: window
+      });
+      document.dispatchEvent(mouseEvt);
+    } catch (_) {}
+
+    try {
+      const pointerEvt = new PointerEvent('pointermove', {
+        bubbles: true,
+        cancelable: true,
+        clientX: clientX,
+        clientY: clientY,
+        screenX: clientX + (window.screenX || 0),
+        screenY: clientY + (window.screenY || 0),
+        view: window,
+        pointerType: 'touch',
+        isPrimary: true
+      });
+      document.dispatchEvent(pointerEvt);
+    } catch (_) {}
   }
 
   // ============================================================
@@ -497,8 +605,7 @@
       if (!localOwnerFlag) return;
 
       try { window.__ffkaLastActivity = Date.now(); } catch (_) {}
-      try { window.dispatchEvent(new Event('mousemove')); } catch (_) {}
-      try { window.dispatchEvent(new Event('pointermove')); } catch (_) {}
+      emitSyntheticActivity();
     }, Math.max(5000, USER_ACTIVITY_TICK_MS));
   }
 
@@ -542,7 +649,7 @@
     setUi(on);
 
     if (on) {
-      installVisibilityHooksOnce();
+      installVisibilityHooks();
       await startKeepAlive();
 
       const alive = await isOwnerAlive();
@@ -569,8 +676,10 @@
     if (!isBgPlayDomain()) return;
     if (!ev || !ev.target) return;
 
-    await claimOwner('media-play');
-    await refreshLocalOwnerFlag();
+    const claimed = await claimOwner('media-play');
+    if (claimed) {
+      await refreshLocalOwnerFlag();
+    }
   }, true);
 
   // ============================================================
@@ -608,7 +717,7 @@
       if (!alive) await claimOwner('fallback-enable');
       await refreshLocalOwnerFlag();
 
-      installVisibilityHooksOnce();
+      installVisibilityHooks();
       startOwnerHeartbeatLoop();
       startUserActivityTick();
     } else {
