@@ -1,5 +1,9 @@
 # Firefox MIUI Tab KeepAlive
 
+> **Status:** This project is still in an early development stage.
+> **Current workaround:** At the moment, the KeepAlive lock can only be activated reliably using the following trick: start a YouTube video briefly and pause it again **before** enabling the lock.
+
+
 A userscript that prevents Firefox Mobile tabs from being aggressively discarded and reloaded by MIUI’s background memory management.
 
 This script is primarily intended for **Xiaomi / MIUI devices**, where Firefox tabs are frequently reloaded after short periods of inactivity, causing:
