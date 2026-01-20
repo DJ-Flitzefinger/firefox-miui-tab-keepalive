@@ -214,3 +214,5 @@ Version 2.x.x currently has a critical bug. Until a fix is released, please use 
 4. The title in the notification player should now show **"Phantom KeepAlive"** instead of the original YouTube title
 
 This workaround ensures the MediaSession is properly initialized. A proper fix is being worked on.
+
+EDIT: The critical bug seems to be fixed and does not appear as long if you dont have opened to many apps at the same time (on low RAM MIUI is more aggressive!)
