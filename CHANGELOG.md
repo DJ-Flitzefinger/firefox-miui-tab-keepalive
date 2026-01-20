@@ -9,6 +9,13 @@ The format is based on **Keep a Changelog** and this project adheres to **Semant
 ### Changed
 ### Fixed
 
+## [2.0.0] - 2026-01-21
+- Code completely revised and optimized
+- Script split into two parts (the part that controls background video playback has been moved to the script firefox-mobile-background-video.user.js)
+- Functionality changed: there is now a “master tab”. The phantom session runs only in this tab. The behavior of the lock icon has been changed
+- README.md revised
+- MP4 replaced with Canvas, because MP4 caused too many issues
+
 ## [1.2.1] - 2026-01-19
 ### Changed
 - MediaSession is now set only once at startup instead of periodically refreshed.

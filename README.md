@@ -1,178 +1,195 @@
 # Firefox MIUI Tab KeepAlive
 
-> **Status:** This project is still in an early development stage.
-> **Current workaround:** At the moment, the KeepAlive lock can only be activated reliably using the following trick: start a YouTube video briefly and pause it again **before** enabling the lock.
+**Prevents MIUI from killing Firefox Mobile tabs in the background** by maintaining a silent phantom MediaSession.
 
-
-A userscript that prevents Firefox Mobile tabs from being aggressively discarded and reloaded by MIUI’s background memory management.
-
-This script is primarily intended for **Xiaomi / MIUI devices**, where Firefox tabs are frequently reloaded after short periods of inactivity, causing:
-- loss of form data
-- restarted videos
-- broken multi-step workflows
-- destroyed long-lived research sessions
-
-The script works entirely inside Firefox using standard web APIs.  
-No APKs, no root, no system modifications.
+> ⚠️ **Early Development**: This project is still in an early development phase. Expect bugs and breaking changes. Feedback and contributions are welcome!
 
 ---
 
-## What problem does this solve?
+## The Problem
 
-MIUI applies extremely aggressive background process and memory management.  
-Firefox Mobile is **not whitelisted** by MIUI and is therefore treated as expendable.
+Xiaomi's MIUI and similar aggressive Android skins have extremely aggressive memory management that kills background apps and browser tabs. This results in:
 
-As a result:
-- background tabs are discarded
-- paused videos restart
-- filled forms are lost
-- pages reload after switching apps or turning the screen off
+- Switching away from Firefox for a few minutes → tabs get killed
+- Turning off the screen → Firefox gets terminated
+- Watching a YouTube video, switching to another app briefly → video tab is gone
+- Loss of form data
 
-This userscript prevents that by making Firefox appear **continuously active** to the Android system.
+Firefox loses all tab state, and MIUI ignores Android's standard app lifecycle.
 
----
+## The Solution
 
-## How it works (high-level)
+This userscript tricks MIUI into thinking Firefox is actively playing media by:
 
-### 1. Phantom MediaSession KeepAlive (global)
-The script creates a **silent, invisible phantom media session**.
+1. Creating an **invisible, silent video** using a canvas-based stream
+2. Registering a **MediaSession** that appears in Android's notification area
+3. Maintaining **activity signals** (Web Locks, IndexedDB heartbeat) to appear busy
 
-From Android’s point of view:
-- Firefox is actively playing media
-- the app must not be suspended or killed
+MIUI respects apps with active media playback, so Firefox stays alive.
 
-From the user’s point of view:
-- no sound
-- no visible video
-- no UI interference
+## Features
 
-This mechanism applies **globally** to all tabs, including purely text-based pages and forms.
+- **Master Tab System**: Only one YouTube tab runs the keepalive at a time to save battery
+- **Visual Indicator**: A subtle circle badge shows on YouTube pages; a lock icon indicates the active master tab
+- **One-Tap Toggle**: Click the badge to activate/deactivate
+- **Multi-Tab Aware**: Switching the master tab to another YouTube tab is seamless
+- **Battery Optimized**: Uses minimal resources (0.5 FPS canvas, efficient timers)
+- **Non-Intrusive**: Doesn't interfere with actual video playback
 
----
+## How It Works
 
-### 2. Background playback support (whitelisted domains only)
-Some video platforms pause playback when a tab is backgrounded.
-
-For selected domains (e.g. YouTube, Vimeo), the script:
-- fakes the Page Visibility API
-- allows background playback
-- applies this only to **one tab at a time**
-
-Only the **last actively playing tab** becomes the background-play “owner”.  
-All other tabs remain completely idle.
-
-This keeps CPU and battery usage low even with many open tabs.
-
----
-
-### 3. Owner-based architecture (efficient by design)
-- Only one tab is allowed to:
-  - fake visibility
-  - emit minimal synthetic user activity
-- Ownership automatically switches to the last tab that actually started playback
-- If no video exists (e.g. form pages), ownership is assigned when KeepAlive is enabled
-
-This ensures:
-- minimal wakeups
-- predictable behavior
-- no unnecessary background work
-
----
-
-## User Interface
-
-- A small **transparent lock icon** appears in the bottom-right corner
-- Tap once to enable or disable KeepAlive globally
-- The icon is injected **only once** (iframe-safe)
-
----
+```
+┌────────────────────────────────────────────────────────┐
+│                    YouTube Tab                         │
+│  ┌─────────────────────────────────────────────────┐   │
+│  │  Canvas (2x2 px) → captureStream() → <video>    │   │
+│  │         ↓                                       │   │
+│  │  MediaSession API → Android Notification        │   │
+│  │         ↓                                       │   │
+│  │  "Phantom KeepAlive" appears in media controls  │   │
+│  └─────────────────────────────────────────────────┘   │
+│                         +                              │
+│  Web Lock (exclusive) + IndexedDB heartbeat (15s)      │
+└────────────────────────────────────────────────────────┘
+                          ↓
+        MIUI sees active media → doesn't kill Firefox
+```
 
 ## Installation
 
-### Option 1: Greasy Fork (recommended)
+### Prerequisites
 
-1. Install a userscript manager for Firefox (Android):
-   - [Tampermonkey (Firefox Add-ons)](https://addons.mozilla.org/firefox/addon/tampermonkey/)
-   - [Violentmonkey (Firefox Add-ons)](https://addons.mozilla.org/firefox/addon/violentmonkey/)
+- **Firefox Mobile** (tested on Firefox for Android)
+- **Tampermonkey** extension ([Install from Firefox Add-ons](https://addons.mozilla.org/firefox/addon/tampermonkey/))
+- A **Xiaomi/MIUI device** (or other aggressive Android skin like ColorOS, FunTouchOS, etc.)
 
-2. Open the script on Greasy Fork:
-   - [Firefox MIUI Tab KeepAlive](https://greasyfork.org/en/scripts/563165-firefox-miui-tab-keepalive)
+### Steps
 
-3. Click **Install**.
+1. Install Tampermonkey in Firefox Mobile
+2. Visit the Greasy Fork page and click **Install**:
+   
+   **[Install Firefox MIUI Tab KeepAlive](https://greasyfork.org/en/scripts/563165-firefox-miui-tab-keepalive)**
 
-4. Reload Firefox tabs if needed.
+3. Tampermonkey will ask for confirmation → click **Install**
+4. Open any YouTube page → you should see a small circle in the bottom-right corner
 
-This method provides automatic updates.
+5. (optional): If videos are not played on your phone then they are in backround or screen is switched off additionally install this script (README.md in folder "firefox-mobile-background-video"):
 
----
+   **[Install Firefox Mobile Background Video](https://greasyfork.org/en/scripts/563406-firefox-mobile-background-video)**
 
-### Option 2: Direct install from GitHub
-1. Install a userscript manager (Tampermonkey / Violentmonkey)
-2. Open the raw script file:
-   - `firefox-miui-tab-keepalive.user.js`
-3. Confirm installation in your userscript manager
+## Usage
 
----
+### Activating the KeepAlive
 
-## Configuration (optional)
+1. Open YouTube in Firefox Mobile
+2. Start a random Video and then pause it (otherwise the need Player in the notifications will not appear)
+3. Look for the **circle badge** (○) in the bottom-right corner
+4. **Tap the circle** → a lock icon appears inside
+5. Check your Android notifications → "Phantom KeepAlive" should appear
 
-The script works out of the box.  
-Advanced users may customize behavior by editing the configuration section at the top of the script.
+### Deactivating
 
-### 1. Background-play domain whitelist
+- **Tap the badge again** (when showing the lock) → keepalive stops
+- Or: Simply close the master tab
 
-```js
-const BGPLAY_HOST_SUFFIXES = [
-  'youtube.com',
-  'youtube-nocookie.com',
-  'vimeo.com',
-  // 'your-domain.tld',
-];
-````
+### Switching Master Tab (not needed to be done, but good to know)
 
-* Suffix matching is used
-  (`youtube.com` also matches `m.youtube.com`, `www.youtube.com`, etc.)
-* Add domains where background playback should be allowed
-* The global KeepAlive mechanism is **not affected** by this list
+If you have multiple YouTube tabs open:
+- Tap the badge on any other YouTube tab → that tab becomes the new master
+- The previous master automatically releases
 
----
+### Visual States
 
-### 2. Timing parameters (advanced)
+| Badge State | Meaning |
+|-------------|---------|
+| ○ (empty circle) | KeepAlive available but not active on this tab |
+| 🔒 (circle with lock) | This tab is the master, keepalive is running |
 
-```js
-const USER_ACTIVITY_TICK_MS = 60000;
-const OWNER_HEARTBEAT_MS = 8000;
-const OWNER_TTL_MS = 25000;
-const MEDIASESSION_REFRESH_MS = 60000;
+## Configuration
+
+Advanced users can modify the `SETTINGS` object at the top of the script:
+
+```javascript
+const SETTINGS = {
+  mediaSession: {
+    refreshIntervalMs: 10000,      // How often to refresh MediaSession (ms)
+    skipIfRealMediaOnPage: true,   // Don't refresh while real video plays
+  },
+  phantomVideo: {
+    retryDelayMinMs: 15000,        // Min delay for play() retry
+    retryDelayMaxMs: 120000,       // Max delay (exponential backoff)
+    canvasStreamFps: 0.5,          // Canvas frame rate (lower = less battery)
+  },
+  extras: {
+    webLock: true,                 // Use Web Locks API
+    indexedDBHeartbeat: true,      // Periodic IndexedDB write
+  },
+  indexedDB: {
+    heartbeatIntervalMs: 15000,    // IndexedDB write interval
+  },
+};
 ```
 
-**What they affect:**
+### Tuning for Battery vs. Stability
 
-* Higher values → fewer wakeups, better battery life
-* Lower values → more aggressive keepalive behavior
+| Setting | Lower Value | Higher Value |
+|---------|-------------|--------------|
+| `refreshIntervalMs` | More stable, more battery | Less battery, may drop |
+| `canvasStreamFps` | Less battery | More "realistic" video |
+| `heartbeatIntervalMs` | More activity signals | Less battery |
 
-The defaults are intentionally conservative and battery-friendly.
+## Limitations
 
----
+- **YouTube only**: The script currently only runs on `youtube.com` and `m.youtube.com`. This is intentional—YouTube is the most common use case, and limiting scope reduces battery impact.
 
-## What this script does NOT do
+- **Requires one YouTube tab**: You need at least one YouTube tab open (it doesn't need to play anything).
 
-* No audible audio playback
-* No visible video
-* No hijacking of real media focus
-* No system-level modifications
-* No tracking or external network calls
+- **Not 100% guaranteed**: Extremely aggressive battery saver modes or very low memory situations may still kill Firefox. This script significantly improves survival rate but can't override all system-level kills.
 
----
+- **Media notification visible**: A "Phantom KeepAlive" entry appears in your Android media controls. This is by design—it's what keeps Firefox alive.
 
-## Intended use cases
+- **Music played in other apps can break the workaround**: Apps that play sound and overwrite the player in the Android notifications will overwrite/stop the KeepAlive session. This could work for a few seconds, but if stopped for to long MIUI will most likely start killing tabs.
 
-* Long form filling without data loss
-* Prevent paused videos from restarting
-* Keep research tabs alive for days or weeks
-* Switch apps without Firefox tabs being destroyed
+## Troubleshooting
 
----
+### YouTube tabs getting reloaded, lock icons disappears on master Tab
+- This is most likely caused by RAM is to full ---> try to close as many apps as possible
+
+### Badge doesn't appear
+- Make sure Tampermonkey is enabled
+- Check that the script is enabled in Tampermonkey's dashboard
+- Refresh the YouTube page
+
+### KeepAlive activates but Firefox still gets killed
+- Try lowering `refreshIntervalMs` to `5000`
+- Make sure MIUI's battery saver isn't set to "Ultra" mode
+- Add Firefox to MIUI's "Battery saver exclusions"
+
+### Interferes with music apps
+- The script is designed to not steal audio focus
+- If you experience issues, try disabling `skipIfRealMediaOnPage`
+
+### "Phantom KeepAlive" doesn't appear in notifications
+- Some MIUI versions hide media notifications by default
+- Check notification settings for Firefox
+
+### Optimize XIAOMIs aggressive Memorymanagement
+- It is a good additional idea to apply the tweaks mentioned on this site:
+https://dontkillmyapp.com/xiaomi
+
+## Tested On
+
+- Xiaomi MI 11 Ultra with HyperOS 1.0.11.0.UKAEUVF
+- Firefox Mobile (latest)
+- Tampermonkey
+
+*If you've tested on other devices/versions, please open an issue or PR to update this list!*
+
+### Development Notes
+
+- The script uses a **Master Tab** pattern to ensure only one tab runs the keepalive
+- State is shared via Tampermonkey's `GM_getValue`/`GM_setValue` storage
+- The canvas-based approach was chosen over MP4 data URLs for stability
 
 ## License
 
@@ -180,12 +197,20 @@ GNU General Public License v3 (GPL-3.0)
 
 If you distribute a modified version of this script, it must remain GPL-licensed.
 
+## Acknowledgments
+
+- Inspired by the frustration of losing Firefox tabs on MIUI
+- Thanks to the Tampermonkey team for making userscripts possible on mobile
+
 ---
 
-## Source & Development
+## ⚠️ Temporary Workaround (v2.x.x Issue)
 
-* Source code and issue tracking: **GitHub repository**
-* Distribution and updates: **Greasy Fork**
-* https://github.com/DJ-Flitzefinger/firefox-miui-tab-keepalive/releases/latest
+Version 2.x.x currently has a critical bug. Until a fix is released, please use **version 1.2.1** with the following workaround:
 
-Contributions, bug reports, and platform-specific findings are welcome.
+1. Open a random YouTube video
+2. Press **Play** and then **Pause** (you should now see the video player in the notifications displaying the original video title)
+3. Activate the script by pressing on the circle so it shows the lock icon. If it was already activated, deactivate and reactivate it.
+4. The title in the notification player should now show **"Phantom KeepAlive"** instead of the original YouTube title
+
+This workaround ensures the MediaSession is properly initialized. A proper fix is being worked on.
