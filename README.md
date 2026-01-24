@@ -1,3 +1,22 @@
+**UPDATE (2026-01-24): This thread is deprecated**
+
+I’ve stopped development of the old approach that this thread was based on (older v2.x / originally Firefox-focused).  
+The project has moved to a new concept:
+
+- **Multi-browser focus** (any mobile browser with Tampermonkey)
+- **Community-driven profiles/presets**: you can share working settings in a standardized format so we can build a list of “known-good” configurations for different devices/ROM versions
+
+✅ **New GitHub repository (docs + source + install):**  
+https://github.com/DJ-Flitzefinger/miui-browser-tab-keepalive
+
+✅ **New Reddit thread (active discussion + testing results):**  
+https://www.reddit.com/r/Xiaomi/comments/1qlm81b/fixno_rootadb_miuihyperos_keeps_killing_your/
+
+Please post all new test results / bugs / working configurations in the new thread so everything stays in one place.
+
+========================================
+
+
 # Firefox MIUI Tab KeepAlive
 
 **Prevents MIUI from killing Firefox Mobile tabs in the background** by maintaining a silent phantom MediaSession.
